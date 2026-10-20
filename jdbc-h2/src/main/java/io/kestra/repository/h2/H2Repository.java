@@ -4,6 +4,7 @@ import java.util.*;
 
 import org.jooq.*;
 import org.jooq.Record;
+import org.jooq.exception.IntegrityConstraintViolationException;
 import org.jooq.impl.DSL;
 
 import io.kestra.core.repositories.ArrayListTotal;
@@ -42,21 +43,33 @@ public class H2Repository<T> extends io.kestra.jdbc.AbstractJdbcRepository<T> {
     }
 
     private int persistInternal(T entity, DSLContext context, Map<Field<Object>, Object> fields) {
-        int affectedRows = context
-            .update(table)
-            .set(fields)
-            .where(KEY_FIELD.eq(key(entity)))
-            .execute();
+        int affectedRows = this.updateRows(entity, context, fields);
+        if (affectedRows != 0) {
+            return affectedRows;
+        }
 
-        if (affectedRows == 0) {
+        try {
             return context
                 .insertInto(table)
                 .set(KEY_FIELD, key(entity))
                 .set(fields)
                 .execute();
-        } else {
-            return affectedRows;
+        } catch (IntegrityConstraintViolationException e) {
+            // another transaction inserted the same key after our update, so update its row as an upsert would
+            int updatedRows = this.updateRows(entity, context, fields);
+            if (updatedRows == 0) {
+                throw e;
+            }
+            return updatedRows;
         }
+    }
+
+    private int updateRows(T entity, DSLContext context, Map<Field<Object>, Object> fields) {
+        return context
+            .update(table)
+            .set(fields)
+            .where(KEY_FIELD.eq(key(entity)))
+            .execute();
     }
 
     @Override

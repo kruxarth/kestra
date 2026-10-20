@@ -1,12 +1,18 @@
 package io.kestra.core.repositories;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -79,6 +85,36 @@ public abstract class AbstractKvMetadataRepositoryTest {
         assertThat(found.get().getRevision()).isEqualTo(2);
         assertThat(found.get().isLast()).isTrue();
         assertThat(found.get().isDeleted()).isFalse();
+    }
+
+    @Test
+    void shouldSaveEveryWriteWhenSameKeyIsSavedConcurrently() throws IOException {
+        String tenantId = TestsUtils.randomTenant();
+        String namespace = TestsUtils.randomNamespace();
+        String key = "concurrent-kv";
+        int writers = 8;
+        CountDownLatch start = new CountDownLatch(1);
+
+        List<Future<PersistedKvMetadata>> saves;
+        try (ExecutorService executor = Executors.newFixedThreadPool(writers)) {
+            saves = IntStream.range(0, writers)
+                .mapToObj(i -> executor.submit(() -> {
+                    start.await();
+                    return kvMetadataRepositoryInterface.save(
+                        PersistedKvMetadata.builder()
+                            .tenantId(tenantId)
+                            .namespace(namespace)
+                            .name(key)
+                            .description("writer " + i)
+                            .build()
+                    );
+                }))
+                .toList();
+            start.countDown();
+        }
+
+        assertThat(saves).allSatisfy(save -> assertThat(save).succeedsWithin(Duration.ofSeconds(10)));
+        assertThat(kvMetadataRepositoryInterface.findByName(tenantId, namespace, key)).isPresent();
     }
 
     @Test
