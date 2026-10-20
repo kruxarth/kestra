@@ -217,6 +217,28 @@ class SetTest {
     }
 
     @Test
+    void shouldSetKVGivenExpiredKeyAndOverwriteFalse() throws Exception {
+        // Given
+        String key = IdUtils.create();
+        Set set = Set.builder()
+            .id(Set.class.getSimpleName())
+            .type(Set.class.getName())
+            .key(Property.ofValue(key))
+            .value(Property.ofValue("new-value"))
+            .overwrite(Property.ofValue(false))
+            .build();
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, set, Map.of());
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
+        kv.put(key, new KVValueAndMetadata(new KVMetadata(null, Instant.now().minus(1, ChronoUnit.HOURS)), "expired-value"));
+
+        // When
+        set.run(runContext);
+
+        // Then
+        assertThat(kv.getValue(key)).isEqualTo(Optional.of(new KVValue("new-value")));
+    }
+
+    @Test
     void typeSpecified() throws Exception {
         String key = "specified_key";
         KVStore kv = createAndPerformSetTask(key, "123.45", KVType.NUMBER);

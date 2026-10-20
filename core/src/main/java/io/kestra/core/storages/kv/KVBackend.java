@@ -34,7 +34,7 @@ public interface KVBackend {
     Optional<InputStream> getRawValue(String tenant, String namespace, String key) throws IOException, ResourceExpiredException;
 
     /**
-     * @return the entry, or {@link Optional#empty()} if it does not exist or is deleted.
+     * @return the entry, or {@link Optional#empty()} if it does not exist, is deleted or expired.
      */
     Optional<KVEntry> get(String tenant, String namespace, String key) throws IOException;
 
