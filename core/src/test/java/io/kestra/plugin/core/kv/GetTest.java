@@ -9,9 +9,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import io.kestra.core.context.TestRunContextFactory;
+import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.storages.kv.KVMetadata;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
@@ -119,5 +121,32 @@ class GetTest {
         Get finalGet = get.toBuilder().errorOnMissing(Property.ofValue(true)).build();
         NoSuchElementException noSuchElementException = Assertions.assertThrows(NoSuchElementException.class, () -> finalGet.run(runContext));
         assertThat(noSuchElementException.getMessage()).isEqualTo("No value found for key 'my-key' in namespace '" + namespaceId + "' and `errorOnMissing` is set to true");
+    }
+
+    @Test
+    void shouldGetNullGivenExpiredKeyUnlessErrorOnMissing() throws Exception {
+        // Given
+        String namespaceId = "io.kestra." + IdUtils.create();
+        RunContext runContext = this.runContextFactory.of(namespaceId, Map.of());
+        KVStore kv = runContext.namespaceKv(namespaceId);
+        KVMetadata expired = new KVMetadata(null, Instant.now().minus(1, ChronoUnit.HOURS));
+        kv.put("expired-key", new KVValueAndMetadata(expired, "value"));
+        kv.put("another-expired-key", new KVValueAndMetadata(expired, "value"));
+
+        Get get = Get.builder()
+            .id(Get.class.getSimpleName())
+            .type(Get.class.getName())
+            .key(Property.ofValue("expired-key"))
+            .build();
+
+        // When
+        Get.Output run = get.run(runContext);
+
+        // Then
+        assertThat(run.getValue()).isNull();
+
+        Get errorOnMissingGet = get.toBuilder().key(Property.ofValue("another-expired-key")).errorOnMissing(Property.ofValue(true)).build();
+        ResourceExpiredException exception = Assertions.assertThrows(ResourceExpiredException.class, () -> errorOnMissingGet.run(runContext));
+        assertThat(exception.getMessage()).isEqualTo("The requested value has expired");
     }
 }
