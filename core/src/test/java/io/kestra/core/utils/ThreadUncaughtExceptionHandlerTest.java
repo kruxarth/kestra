@@ -2,6 +2,7 @@ package io.kestra.core.utils;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletionException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import io.kestra.core.plugins.PluginRegistry;
 import io.kestra.core.storages.StorageInterface;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class ThreadUncaughtExceptionHandlerTest {
 
@@ -67,16 +69,40 @@ class ThreadUncaughtExceptionHandlerTest {
         assertThat(newerContext.shutdownCalled).isFalse();
     }
 
+    @Test
+    void shouldNotThrowWhenTheShutdownFails() {
+        // Given: a context whose shutdown cannot start the threads it needs
+        var context = new RecordingContext(new CompletionException(new OutOfMemoryError("unable to create native thread")));
+        var handler = new ThreadUncaughtExceptionHandler(context);
+
+        // When / Then: the failure stays in the handler, which then goes on to exit the JVM outside tests
+        assertThatCode(() -> handler.uncaughtException(Thread.currentThread(), new OutOfMemoryError("unable to create native thread")))
+            .doesNotThrowAnyException();
+        assertThat(context.shutdownCalled).isTrue();
+    }
+
     /**
      * A recording {@link KestraContext} whose environments contain "test" so the handler never
      * calls {@code Runtime.getRuntime().exit(1)}.
      */
     private static final class RecordingContext extends KestraContext {
+        private final RuntimeException shutdownFailure;
         private volatile boolean shutdownCalled = false;
+
+        private RecordingContext() {
+            this(null);
+        }
+
+        private RecordingContext(RuntimeException shutdownFailure) {
+            this.shutdownFailure = shutdownFailure;
+        }
 
         @Override
         public void shutdown() {
             this.shutdownCalled = true;
+            if (shutdownFailure != null) {
+                throw shutdownFailure;
+            }
         }
 
         @Override
