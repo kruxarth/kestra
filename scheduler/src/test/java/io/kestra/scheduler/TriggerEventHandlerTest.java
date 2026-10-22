@@ -821,6 +821,47 @@ class TriggerEventHandlerTest {
     }
 
     @Test
+    void shouldKeepTriggerDisabledWhenLockingExecutionEndsInStateNotInStopAfter() {
+        // GIVEN — a trigger with stopAfter, disabled while its execution is running
+        triggerStateStore.save(
+            TriggerState.of(triggerId, TriggerType.SCHEDULE, List.of(State.Type.FAILED), 0)
+                .locked(CLOCK, true)
+                .executionId(CLOCK, "exec-123")
+        );
+        handler = newTriggerEventHandler(List.of());
+        handler.handle(CLOCK, TEST_VNODE, new SetDisableTrigger(triggerId, true));
+
+        // WHEN
+        handler.handle(CLOCK, TEST_VNODE, new TriggerExecutionTerminated(triggerId, "exec-123", State.Type.SUCCESS));
+
+        // THEN
+        Optional<TriggerState> updated = triggerStateStore.findByIdWithoutAcl(triggerId);
+        assertThat(updated).isPresent();
+        assertThat(updated.get().isLocked()).isFalse();
+        assertThat(updated.get().isDisabled()).isTrue();
+    }
+
+    @Test
+    void shouldKeepTriggerDisabledWhenEvaluationCreatesExecutionInStateNotInStopAfter() {
+        // GIVEN — a polling trigger with stopAfter, disabled while its evaluation is on a worker
+        triggerStateStore.save(
+            TriggerState.of(triggerId, TriggerType.POLLING, List.of(State.Type.FAILED), 0)
+                .locked(CLOCK, true)
+        );
+        handler = newTriggerEventHandler(List.of(Fixtures.defaultFlow()));
+        handler.handle(CLOCK, TEST_VNODE, new SetDisableTrigger(triggerId, true));
+        TriggerEvaluationResult created = new TriggerEvaluationResult(IdUtils.create(), State.Type.CREATED, null, null, null, null, null);
+
+        // WHEN
+        handler.handle(CLOCK, TEST_VNODE, new TriggerEvaluated(triggerId, created));
+
+        // THEN
+        Optional<TriggerState> updated = triggerStateStore.findByIdWithoutAcl(triggerId);
+        assertThat(updated).isPresent();
+        assertThat(updated.get().isDisabled()).isTrue();
+    }
+
+    @Test
     void shouldUnlockTriggerWithoutEnablingItWhenLockingExecutionIsDeleted() {
         // GIVEN
         triggerStateStore.save(triggerState.locked(CLOCK, true).executionId(CLOCK, "exec-123").disabled(CLOCK, true));
