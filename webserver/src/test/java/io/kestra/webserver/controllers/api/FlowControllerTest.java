@@ -669,6 +669,28 @@ class FlowControllerTest {
     }
 
     @Test
+    void shouldNotDeleteOrUpdateFlowsWhenABulkUpdatedFlowIsInvalid() {
+        String namespace = "io.kestra.bulkinvalid";
+        client.toBlocking().retrieve(POST("/api/v1/main/flows", generateFlowAsString("missing", namespace, "a")).contentType(MediaType.APPLICATION_YAML), Flow.class);
+        client.toBlocking().retrieve(POST("/api/v1/main/flows", generateFlowAsString("updated", namespace, "a")).contentType(MediaType.APPLICATION_YAML), Flow.class);
+
+        String flows = String.join(
+            "---\n",
+            generateFlowAsString("updated", namespace, "b"),
+            generateInvalidFlowAsString("invalid", namespace)
+        );
+        HttpClientResponseException exception = assertThrows(
+            HttpClientResponseException.class,
+            () -> client.toBlocking().exchange(POST("/api/v1/main/flows/" + namespace, flows).contentType(MediaType.APPLICATION_YAML))
+        );
+        assertThat(exception.getStatus().getCode()).isEqualTo(UNPROCESSABLE_ENTITY.getCode());
+
+        assertThat(jdbcFlowRepository.findById(MAIN_TENANT, namespace, "missing")).isPresent();
+        assertThat(jdbcFlowRepository.findById(MAIN_TENANT, namespace, "updated").orElseThrow().getRevision()).isEqualTo(1);
+        assertThat(jdbcFlowRepository.findById(MAIN_TENANT, namespace, "invalid")).isEmpty();
+    }
+
+    @Test
     void updateFlowsInNamespaceWithMissingNamespaceReturns422() {
         String flowWithoutNamespace = """
             id: crashflow

@@ -163,19 +163,7 @@ public class FlowService {
             throw new IllegalArgumentException("Cannot create flow with null or blank source");
         }
 
-        // Strict parsing (unknown / duplicate properties) and constraint validation are both skipped
-        // for drafts: they are allowed to be saved invalid and will fail at execution time instead.
-        // Use flow.isDraft() (set from the API draft flag) rather than the parsed value,
-        // since the draft flag is not part of the YAML source.
-        if (!flow.isDraft()) {
-            // Best-effort: installed before validation so a save through any server-side path does
-            // not fail on a not-yet-installed plugin type; a failed install just leaves the
-            // pre-existing "Invalid type" validation error in place.
-            pluginAutoInstallService.installMissingPlugins(flow.getSource());
-            FlowWithSource parsed = flowParsingService.parse(flow.getTenantId(), flow.getSource(), true);
-            modelValidator.validate(flowParsingService.parseForValidation(parsed));
-            throwOnCyclicDependency(parsed);
-        }
+        validate(flow);
 
         FlowWithSource created = flowRepository.create(flow);
 
@@ -202,6 +190,20 @@ public class FlowService {
         }
         Objects.requireNonNull(previous, "Cannot update a flow with null previous");
 
+        validate(flow);
+
+        FlowWithSource updated = flowRepository.update(flow, previous);
+
+        // impact downstream consumers: topology, scheduler and flow metastore
+        impactDownstreamConsumers(updated);
+
+        return updated;
+    }
+
+    /**
+     * Validates the given flow the way {@link #create(GenericFlow)} and {@link #update(GenericFlow, FlowInterface)} do, without saving it.
+     */
+    public void validate(GenericFlow flow) throws FlowProcessingException {
         // Strict parsing (unknown / duplicate properties) and constraint validation are both skipped
         // for drafts: they are allowed to be saved invalid and will fail at execution time instead.
         // Use flow.isDraft() (set from the API draft flag) rather than the parsed value,
@@ -215,13 +217,6 @@ public class FlowService {
             modelValidator.validate(flowParsingService.parseForValidation(parsed));
             throwOnCyclicDependency(parsed);
         }
-
-        FlowWithSource updated = flowRepository.update(flow, previous);
-
-        // impact downstream consumers: topology, scheduler and flow metastore
-        impactDownstreamConsumers(updated);
-
-        return updated;
     }
 
     /**
