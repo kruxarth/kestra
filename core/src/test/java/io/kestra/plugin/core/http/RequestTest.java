@@ -751,6 +751,21 @@ class RequestTest {
         assertThat(output.getCode()).isEqualTo(200);
     }
 
+    @Test
+    void shouldDecodeBodyWithTheCharsetOfTheResponseContentType() throws Exception {
+        Request task = Request.builder()
+            .id(RequestTest.class.getSimpleName())
+            .type(RequestTest.class.getName())
+            .uri(Property.ofValue(serverUrl() + "/latin1"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Request.Output output = task.run(runContext);
+
+        assertThat(output.getBody()).isEqualTo("Café crème à Paris");
+    }
+
     @Controller
     static class MockController {
 
@@ -876,6 +891,12 @@ class RequestTest {
         @Get("/uri%20with%20space")
         HttpResponse<String> uriWithSpace() {
             return HttpResponse.ok("Hello World");
+        }
+
+        @Get("/latin1")
+        HttpResponse<byte[]> latin1() {
+            return HttpResponse.ok("Café crème à Paris".getBytes(StandardCharsets.ISO_8859_1))
+                .contentType("text/plain; charset=ISO-8859-1");
         }
 
         @Get("/large")
