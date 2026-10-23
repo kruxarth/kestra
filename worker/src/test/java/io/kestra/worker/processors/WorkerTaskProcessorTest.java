@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
@@ -122,6 +123,23 @@ class WorkerTaskProcessorTest {
         assertThat(results)
             .as("an interrupted task's failure must be deferred for resubmission, not reported")
             .noneMatch(result -> result.getTaskRun().getState().isFailed());
+    }
+
+    @Test
+    void shouldSignalStopToTaskWhenWorkerStoppedBeforeTheTaskStarted() {
+        // Given a worker stopping after it picked up the task, but before the task started
+        StopRecording task = StopRecording.builder()
+            .type(StopRecording.class.getName())
+            .id("stop-recording")
+            .build();
+        WorkerTaskProcessor processor = newProcessor(new InMemoryWorkerQueue<>(100));
+        processor.stop();
+
+        // When the task finally runs
+        processor.process(workerTaskFor(task));
+
+        // Then it has already been asked to stop, as a task running at stop time would have been
+        assertThat(StopRecording.STOPPED_BEFORE_RUN.get()).isTrue();
     }
 
     @Test
@@ -671,6 +689,28 @@ class WorkerTaskProcessorTest {
         @Override
         public VoidOutput run(RunContext runContext) {
             throw new RuntimeException("simulated task failure during shutdown drain");
+        }
+    }
+
+    /**
+     * A task that records whether it had been asked to stop when it started running.
+     */
+    @SuperBuilder
+    @Getter
+    @NoArgsConstructor
+    public static class StopRecording extends Task implements RunnableTask<VoidOutput> {
+        static final AtomicBoolean STOP_REQUESTED = new AtomicBoolean(false);
+        static final AtomicBoolean STOPPED_BEFORE_RUN = new AtomicBoolean(false);
+
+        @Override
+        public VoidOutput run(RunContext runContext) {
+            STOPPED_BEFORE_RUN.set(STOP_REQUESTED.get());
+            return null;
+        }
+
+        @Override
+        public void stop() {
+            STOP_REQUESTED.set(true);
         }
     }
 
